@@ -1,16 +1,25 @@
 /**
- * Chrome Blocks - Background Service Worker (Manifest V3)
- * Manages declarativeNetRequest rulesets, dynamic whitelist rules,
- * blocked count statistics, and extension badge status.
+ * Chrome Blocks - Streamlined Background Service Worker (Manifest V3)
+ * 
+ * Manages DeclarativeNetRequest rulesets, dynamic whitelist rules,
+ * in-memory telemetry caching (preventing disk I/O thrashing), and tab badges.
  */
 
 const RULESET_ID = 'ruleset_1';
 const TAB_STATS = new Map(); // tabId -> count of ads blocked in this tab
 
+// In-memory stats cache to completely eliminate disk I/O lockups and IPC thrashing
+let inMemoryTotalBlocked = 0;
+let inMemoryTodayBlocked = 0;
+let inMemoryLastResetDate = new Date().toDateString();
+let isEnabledState = true;
+let inMemoryWhitelistedDomains = [];
+let saveStorageTimeout = null;
+
 /**
- * Initialize default storage values if not already present
+ * Initialize extension state and cache from storage on install/startup
  */
-chrome.runtime.onInstalled.addListener(async (details) => {
+chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get([
     'isEnabled',
     'totalBlocked',
@@ -20,18 +29,24 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   ]);
 
   const today = new Date().toDateString();
-  const defaults = {
-    isEnabled: current.isEnabled !== undefined ? current.isEnabled : true,
-    totalBlocked: current.totalBlocked || 0,
-    todayBlocked: current.lastResetDate === today ? (current.todayBlocked || 0) : 0,
-    lastResetDate: today,
-    whitelistedDomains: current.whitelistedDomains || []
-  };
 
-  await chrome.storage.local.set(defaults);
-  await syncRuleset(defaults.isEnabled);
-  await syncWhitelistDynamicRules(defaults.whitelistedDomains);
-  updateBadgeState(defaults.isEnabled);
+  isEnabledState = current.isEnabled !== undefined ? Boolean(current.isEnabled) : true;
+  inMemoryTotalBlocked = current.totalBlocked || 0;
+  inMemoryTodayBlocked = current.lastResetDate === today ? (current.todayBlocked || 0) : 0;
+  inMemoryLastResetDate = today;
+  inMemoryWhitelistedDomains = current.whitelistedDomains || [];
+
+  await chrome.storage.local.set({
+    isEnabled: isEnabledState,
+    totalBlocked: inMemoryTotalBlocked,
+    todayBlocked: inMemoryTodayBlocked,
+    lastResetDate: today,
+    whitelistedDomains: inMemoryWhitelistedDomains
+  });
+
+  await syncRuleset(isEnabledState);
+  await syncWhitelistDynamicRules(inMemoryWhitelistedDomains);
+  updateBadgeState(isEnabledState);
 });
 
 /**
@@ -49,12 +64,12 @@ async function syncRuleset(enabled) {
       });
     }
   } catch (error) {
-    console.warn('Chrome Blocks: Ruleset update notice:', error.message);
+    console.warn('Chrome Blocks: Ruleset sync notice:', error.message);
   }
 }
 
 /**
- * Update dynamic rules for whitelisted domains to allow all requests
+ * Update dynamic rules for whitelisted domains to bypass blocking
  */
 async function syncWhitelistDynamicRules(domains = []) {
   try {
@@ -63,7 +78,7 @@ async function syncWhitelistDynamicRules(domains = []) {
 
     const addRules = domains.map((domain, index) => ({
       id: 10000 + index + 1,
-      priority: 100, // High priority to override blocking rules
+      priority: 100, // High priority to override block rules
       action: { type: 'allowAllRequests' },
       condition: {
         initiatorDomains: [domain.toLowerCase().trim()],
@@ -90,52 +105,61 @@ async function syncWhitelistDynamicRules(domains = []) {
       addRules: addRules
     });
   } catch (error) {
-    console.warn('Chrome Blocks: Whitelist dynamic rules notice:', error.message);
+    console.warn('Chrome Blocks: Dynamic whitelist update notice:', error.message);
   }
 }
 
 /**
- * Increment total and daily blocked statistics
+ * Debounced persistence of in-memory telemetry to chrome.storage.local
+ * Prevents writing to disk hundreds of times per second.
  */
-async function incrementBlockedStats(count = 1, tabId = null) {
-  if (count <= 0) return;
+function scheduleStorageSave() {
+  if (saveStorageTimeout) return;
+  saveStorageTimeout = setTimeout(async () => {
+    saveStorageTimeout = null;
+    try {
+      await chrome.storage.local.set({
+        totalBlocked: inMemoryTotalBlocked,
+        todayBlocked: inMemoryTodayBlocked,
+        lastResetDate: inMemoryLastResetDate
+      });
+    } catch (e) {}
+  }, 3500);
+}
 
-  const data = await chrome.storage.local.get([
-    'isEnabled',
-    'totalBlocked',
-    'todayBlocked',
-    'lastResetDate'
-  ]);
-
-  if (data.isEnabled === false) return;
+/**
+ * Increment telemetry in memory with zero disk delay
+ */
+function recordBlockedOccurrence(count = 1, tabId = null) {
+  if (count <= 0 || !isEnabledState) return;
 
   const today = new Date().toDateString();
-  const currentTotal = (data.totalBlocked || 0) + count;
-  const currentDaily = (data.lastResetDate === today ? (data.todayBlocked || 0) : 0) + count;
-
-  await chrome.storage.local.set({
-    totalBlocked: currentTotal,
-    todayBlocked: currentDaily,
-    lastResetDate: today
-  });
-
-  // Track per-tab stats
-  if (tabId && tabId > 0) {
-    const tabCount = (TAB_STATS.get(tabId) || 0) + count;
-    TAB_STATS.set(tabId, tabCount);
-    updateTabBadge(tabId, tabCount);
+  if (inMemoryLastResetDate !== today) {
+    inMemoryTodayBlocked = 0;
+    inMemoryLastResetDate = today;
   }
+
+  inMemoryTotalBlocked += count;
+  inMemoryTodayBlocked += count;
+
+  if (tabId && tabId > 0) {
+    const currentTabCount = (TAB_STATS.get(tabId) || 0) + count;
+    TAB_STATS.set(tabId, currentTabCount);
+    updateTabBadge(tabId, currentTabCount);
+  }
+
+  scheduleStorageSave();
 }
 
 /**
- * Clean up tab tracking when tab is closed
+ * Clean up tab tracking on tab closure
  */
 chrome.tabs.onRemoved.addListener((tabId) => {
   TAB_STATS.delete(tabId);
 });
 
 /**
- * Handle tab navigation / reload: reset tab counter
+ * Reset per-tab counter when navigating to a new URL
  */
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === 'loading') {
@@ -145,15 +169,15 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 /**
- * Handle tab activation: update badge for newly active tab
+ * Update badge text when switching active tabs
  */
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
+chrome.tabs.onActivated.addListener((activeInfo) => {
   const count = TAB_STATS.get(activeInfo.tabId) || 0;
   updateTabBadge(activeInfo.tabId, count);
 });
 
 /**
- * Update extension action badge
+ * Update global extension action badge
  */
 async function updateBadgeState(enabled) {
   try {
@@ -161,7 +185,6 @@ async function updateBadgeState(enabled) {
       await chrome.action.setBadgeText({ text: 'OFF' });
       await chrome.action.setBadgeBackgroundColor({ color: '#64748b' });
     } else {
-      // Find active tab and show its blocked count
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tabs.length > 0 && tabs[0].id) {
         const count = TAB_STATS.get(tabs[0].id) || 0;
@@ -170,15 +193,12 @@ async function updateBadgeState(enabled) {
         await chrome.action.setBadgeText({ text: '' });
       }
     }
-  } catch (e) {
-    // Ignore badge errors if action is unavailable
-  }
+  } catch (e) {}
 }
 
 async function updateTabBadge(tabId, count) {
   try {
-    const data = await chrome.storage.local.get(['isEnabled']);
-    if (data.isEnabled === false) {
+    if (!isEnabledState) {
       await chrome.action.setBadgeText({ tabId, text: 'OFF' });
       await chrome.action.setBadgeBackgroundColor({ tabId, color: '#64748b' });
     } else if (count > 0) {
@@ -188,22 +208,20 @@ async function updateTabBadge(tabId, count) {
     } else {
       await chrome.action.setBadgeText({ tabId, text: '' });
     }
-  } catch (e) {
-    // Tab might be closed
-  }
+  } catch (e) {}
 }
 
 /**
- * Listen for DeclarativeNetRequest matched events (Manifest V3 Debug API)
+ * Catch network-level blocks without triggering disk I/O storms
  */
 if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
   chrome.declarativeNetRequest.onRuleMatchedDebug.addListener((info) => {
-    incrementBlockedStats(1, info.request?.tabId);
+    recordBlockedOccurrence(1, info.request?.tabId);
   });
 }
 
 /**
- * Message Dispatcher for popup and content scripts
+ * Unified Message Dispatcher for popup and content scripts
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || !message.type) return;
@@ -211,28 +229,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     switch (message.type) {
       case 'GET_STATS': {
-        const data = await chrome.storage.local.get([
-          'isEnabled',
-          'totalBlocked',
-          'todayBlocked',
-          'whitelistedDomains'
-        ]);
+        // Return immediately from memory cache (0ms latency, zero disk read)
         sendResponse({
-          isEnabled: data.isEnabled !== false,
-          totalBlocked: data.totalBlocked || 0,
-          todayBlocked: data.todayBlocked || 0,
-          whitelistedDomains: data.whitelistedDomains || []
+          isEnabled: isEnabledState,
+          totalBlocked: inMemoryTotalBlocked,
+          todayBlocked: inMemoryTodayBlocked,
+          whitelistedDomains: inMemoryWhitelistedDomains
         });
         break;
       }
 
       case 'TOGGLE_ENABLE': {
-        const data = await chrome.storage.local.get(['isEnabled']);
-        const newState = !(data.isEnabled !== false);
-        await chrome.storage.local.set({ isEnabled: newState });
-        await syncRuleset(newState);
-        updateBadgeState(newState);
-        sendResponse({ isEnabled: newState });
+        isEnabledState = !isEnabledState;
+        await chrome.storage.local.set({ isEnabled: isEnabledState });
+        await syncRuleset(isEnabledState);
+        updateBadgeState(isEnabledState);
+        sendResponse({ isEnabled: isEnabledState });
         break;
       }
 
@@ -243,23 +255,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           break;
         }
 
-        const data = await chrome.storage.local.get(['whitelistedDomains']);
-        const list = data.whitelistedDomains || [];
         const normDomain = domain.toLowerCase().trim();
-        const index = list.indexOf(normDomain);
+        const index = inMemoryWhitelistedDomains.indexOf(normDomain);
 
         let isNowWhitelisted = false;
         if (index > -1) {
-          list.splice(index, 1);
+          inMemoryWhitelistedDomains.splice(index, 1);
           isNowWhitelisted = false;
         } else {
-          list.push(normDomain);
+          inMemoryWhitelistedDomains.push(normDomain);
           isNowWhitelisted = true;
         }
 
-        await chrome.storage.local.set({ whitelistedDomains: list });
-        await syncWhitelistDynamicRules(list);
-        sendResponse({ success: true, isWhitelisted: isNowWhitelisted, whitelistedDomains: list });
+        await chrome.storage.local.set({ whitelistedDomains: inMemoryWhitelistedDomains });
+        await syncWhitelistDynamicRules(inMemoryWhitelistedDomains);
+        sendResponse({ success: true, isWhitelisted: isNowWhitelisted, whitelistedDomains: inMemoryWhitelistedDomains });
         break;
       }
 
@@ -286,11 +296,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case 'RESET_STATS': {
         const today = new Date().toDateString();
+        inMemoryTotalBlocked = 0;
+        inMemoryTodayBlocked = 0;
+        inMemoryLastResetDate = today;
+
         await chrome.storage.local.set({
           totalBlocked: 0,
           todayBlocked: 0,
           lastResetDate: today
         });
+
         TAB_STATS.clear();
         updateBadgeState(true);
         sendResponse({ success: true });
@@ -299,7 +314,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case 'AD_BLOCKED': {
         const tabId = sender.tab ? sender.tab.id : null;
-        incrementBlockedStats(message.count || 1, tabId);
+        recordBlockedOccurrence(message.count || 1, tabId);
         sendResponse({ success: true });
         break;
       }
