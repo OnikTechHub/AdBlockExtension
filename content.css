@@ -44,7 +44,7 @@
   pointer-events: none !important;
 }
 
-/* YouTube Specific Ad Elements & Overlays */
+/* YouTube Specific Ad Elements, Sidebar Ads & Overlays */
 :root:not(.cb-disabled) #player-ads,
 :root:not(.cb-disabled) .ytp-ad-overlay-container,
 :root:not(.cb-disabled) .ytp-ad-message-container,
@@ -62,6 +62,11 @@
 :root:not(.cb-disabled) ytd-video-masthead-ad-v3-renderer,
 :root:not(.cb-disabled) ytd-primetime-promo-renderer,
 :root:not(.cb-disabled) ytd-ad-slot-renderer,
+:root:not(.cb-disabled) ytd-action-companion-ad-renderer,
+:root:not(.cb-disabled) ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-ads"],
+:root:not(.cb-disabled) #secondary ytd-ad-slot-renderer,
+:root:not(.cb-disabled) #secondary-inner ytd-ad-slot-renderer,
+:root:not(.cb-disabled) ytd-compact-video-renderer:has(ytd-ad-slot-renderer),
 :root:not(.cb-disabled) ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
 :root:not(.cb-disabled) ytd-reel-video-renderer:has(.ytd-ad-slot-renderer),
 :root:not(.cb-disabled) .ytd-merch-shelf-renderer,
