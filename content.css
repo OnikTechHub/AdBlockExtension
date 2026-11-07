@@ -44,11 +44,13 @@
   pointer-events: none !important;
 }
 
-/* YouTube Specific Ad Elements */
+/* YouTube Specific Ad Elements & Overlays */
 :root:not(.cb-disabled) #player-ads,
 :root:not(.cb-disabled) .ytp-ad-overlay-container,
 :root:not(.cb-disabled) .ytp-ad-message-container,
 :root:not(.cb-disabled) .ytp-ad-action-interstitial,
+:root:not(.cb-disabled) .ytp-ad-image-overlay,
+:root:not(.cb-disabled) .ytp-ad-text-overlay,
 :root:not(.cb-disabled) ytd-promoted-sparkles-web-renderer,
 :root:not(.cb-disabled) ytd-promoted-video-renderer,
 :root:not(.cb-disabled) ytd-compact-promoted-video-renderer,
