@@ -196,27 +196,60 @@ async function updateBadgeState(enabled) {
   } catch (e) {}
 }
 
+/**
+ * Tab badge throttle map to avoid flooding Chrome IPC
+ */
+const BADGE_UPDATE_TIMERS = new Map();
+
 async function updateTabBadge(tabId, count) {
-  try {
-    if (!isEnabledState) {
-      await chrome.action.setBadgeText({ tabId, text: 'OFF' });
-      await chrome.action.setBadgeBackgroundColor({ tabId, color: '#64748b' });
-    } else if (count > 0) {
-      const text = count > 999 ? '999+' : String(count);
-      await chrome.action.setBadgeText({ tabId, text });
-      await chrome.action.setBadgeBackgroundColor({ tabId, color: '#00d2ff' });
-    } else {
-      await chrome.action.setBadgeText({ tabId, text: '' });
-    }
-  } catch (e) {}
+  if (!tabId || tabId <= 0) return;
+
+  if (BADGE_UPDATE_TIMERS.has(tabId)) {
+    clearTimeout(BADGE_UPDATE_TIMERS.get(tabId));
+  }
+
+  BADGE_UPDATE_TIMERS.set(tabId, setTimeout(async () => {
+    BADGE_UPDATE_TIMERS.delete(tabId);
+    try {
+      if (!isEnabledState) {
+        await chrome.action.setBadgeText({ tabId, text: 'OFF' });
+        await chrome.action.setBadgeBackgroundColor({ tabId, color: '#64748b' });
+      } else if (count > 0) {
+        const text = count > 999 ? '999+' : String(count);
+        await chrome.action.setBadgeText({ tabId, text });
+        await chrome.action.setBadgeBackgroundColor({ tabId, color: '#00d2ff' });
+      } else {
+        await chrome.action.setBadgeText({ tabId, text: '' });
+      }
+    } catch (e) {}
+  }, 120));
 }
 
 /**
- * Catch network-level blocks without triggering disk I/O storms
+ * Targeted network block listener:
+ * Filters out non-essential telemetry pings and internal media requests
+ * to prevent counter inflation and browser lagging.
  */
-if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
+if (chrome.declarativeNetRequest && chrome.declarativeNetRequest.onRuleMatchedDebug) {
   chrome.declarativeNetRequest.onRuleMatchedDebug.addListener((info) => {
-    recordBlockedOccurrence(1, info.request?.tabId);
+    const req = info?.request;
+    if (!req) return;
+
+    // Filter out non-essential background pings, beacons, and reports that inflate counters
+    const resType = req.type || '';
+    if (resType === 'ping' || resType === 'csp_report' || resType === 'other' && req.url?.includes('/stats/')) {
+      return;
+    }
+
+    // Never count or interfere with YouTube or GoogleVideo requests
+    const url = (req.url || '').toLowerCase();
+    const initiator = (req.initiator || '').toLowerCase();
+    if (url.includes('youtube.com') || url.includes('googlevideo.com') || initiator.includes('youtube.com')) {
+      return;
+    }
+
+    // Record verified network-level ad/tracker block
+    recordBlockedOccurrence(1, req.tabId);
   });
 }
 
