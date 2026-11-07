@@ -1,0 +1,68 @@
+# ==========================================
+# Chrome Blocks - .gitignore
+# Professional Git ignore rules for Chrome MV3 Extension
+# ==========================================
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Editor & IDE Directories
+.vscode/
+*.code-workspace
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~
+
+# Dependencies & Package Managers
+node_modules/
+jspm_packages/
+.npm
+.yarn/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Chrome Extension Cache & Build Artifacts
+# Automatically generated when loading unpacked extensions with declarativeNetRequest
+_metadata/
+*.crx
+*.pem
+*.zip
+dist/
+build/
+out/
+.tmp/
+temp/
+
+# Logs & Diagnostics
+*.log
+logs/
+
+# Explicitly ensure essential extension and documentation files are tracked
+!manifest.json
+!rules.json
+!background.js
+!content.js
+!content.css
+!popup.html
+!popup.css
+!popup.js
+!icons/
+!icons/*.png
+!README.md
+!LICENSE
+!.gitignore
+
