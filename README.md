@@ -36,22 +36,42 @@
 
 ```
 AdBlockExtension/
-├── .gitignore            # Git exclusion rules for OS, IDE & build caches
-├── LICENSE               # MIT License file
-├── README.md             # Project documentation & Git instructions
-├── manifest.json         # Manifest V3 configuration & permission declarations
-├── rules.json            # DeclarativeNetRequest network blocking ruleset (114+ rules)
-├── background.js         # Service worker: DNR ruleset controller, stats tracker, badge sync
-├── content.js            # Content script: YouTube skipper, Facebook cleaner, DOM mutation observer
-├── content.css           # Zero-flicker cosmetic ad suppression stylesheet
-├── popup.html            # Glassmorphic dark popup interface
-├── popup.css             # Developer-grade dark styling & animations
-├── popup.js              # Real-time state management, site whitelisting & stats counter
-└── icons/                # High-resolution extension icons
-    ├── icon16.png
-    ├── icon32.png
-    ├── icon48.png
-    └── icon128.png
+├── src/                      # TypeScript & Tailwind CSS Source Code
+│   ├── types.ts              # Shared TypeScript definitions & message contracts
+│   ├── background.ts         # Type-safe background service worker
+│   ├── content.ts            # Safe YouTube ad-bypass & DOM ad interceptor
+│   ├── popup.ts              # Type-safe popup controller
+│   └── popup.css             # Tailwind CSS input styles
+├── icons/                    # High-resolution extension icons
+├── .gitignore                # Git exclusion rules for OS, IDE & node_modules
+├── build.mjs                 # Fast esbuild & Tailwind build pipeline
+├── package.json              # Project dependencies & build scripts
+├── tsconfig.json             # Strict TypeScript configuration
+├── manifest.json             # Manifest V3 configuration & permission declarations
+├── rules.json                # DeclarativeNetRequest network blocking ruleset
+├── background.js             # Compiled production background service worker
+├── content.js                # Compiled production content script
+├── content.css               # Zero-flicker cosmetic ad suppression stylesheet
+├── popup.html                # Tailwind CSS dark-mode glassmorphic popup UI
+├── popup.css                 # Compiled & minified Tailwind utility styles
+├── popup.js                  # Compiled production popup controller
+├── LICENSE                   # MIT License file
+└── README.md                 # Project documentation
+```
+
+---
+
+## ⚡ Development & Build Scripts
+
+```bash
+# Install dependencies
+npm install
+
+# Build TypeScript and Tailwind CSS bundles (outputs background.js, content.js, popup.js, popup.css)
+npm run build
+
+# Run TypeScript type check
+npm run typecheck
 ```
 
 ---

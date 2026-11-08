@@ -1,0 +1,33 @@
+{
+  "name": "adblockextension",
+  "version": "1.0.0",
+  "description": "Chrome Blocks is a high-performance, production-ready Google Chrome extension engineered strictly under Manifest V3 standards with TypeScript and Tailwind CSS.",
+  "main": "background.js",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "build:css": "tailwindcss -i src/popup.css -o popup.css --minify",
+    "build:ts": "esbuild src/background.ts src/content.ts src/popup.ts --bundle --outdir=. --format=iife --target=chrome100"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OnikTechHub/AdBlockExtension.git"
+  },
+  "keywords": [
+    "chrome-extension",
+    "adblocker",
+    "manifest-v3",
+    "typescript",
+    "tailwindcss"
+  ],
+  "author": "OnikTechHub",
+  "license": "MIT",
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.5",
+    "@types/chrome": "^0.3.7",
+    "esbuild": "^0.28.2",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^7.0.2"
+  }
+}
