@@ -171,83 +171,47 @@ import { StorageData, ModuleSettings, CustomFilters, TabStatsResponse } from './
   ];
 
   /**
-   * Programmatically clicks an element using multi-event sequences
-   */
-  function forceClickElement(element: HTMLElement): void {
-    if (!element) return;
-
-    try {
-      element.focus?.();
-    } catch {}
-
-    const events = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
-    for (const evt of events) {
-      try {
-        element.dispatchEvent(new MouseEvent(evt, {
-          bubbles: true,
-          cancelable: true,
-          view: window
-        }));
-      } catch {}
-    }
-
-    try {
-      element.click();
-    } catch {}
-  }
-
-  /**
-   * Scan for skip buttons and trigger them immediately
+   * Safe skip button trigger:
+   * Uses standard .click() directly on the skip button.
+   * Does NOT dispatch bubbling synthetic pointer/mouse events that cause
+   * YouTube's player container to interpret the click as a play/pause toggle.
    */
   function triggerSkipButtons(container: Document | HTMLElement = document): boolean {
     for (const selector of YOUTUBE_SKIP_SELECTORS) {
       try {
         const btn = container.querySelector(selector) as HTMLElement | null;
         if (btn) {
-          forceClickElement(btn);
+          btn.click();
           recordAdBlocked(1);
           return true;
         }
       } catch {}
     }
 
-    // Text-based fallback (multilingual "Skip" / "বিজ্ঞাপন এড়িয়ে যান")
-    try {
-      const candidates = container.querySelectorAll<HTMLElement>('.video-ads button, .ytp-ad-player-overlay button, [class*="skip"] button');
-      for (const el of candidates) {
-        const text = (el.textContent || '').trim().toLowerCase();
-        if (text === 'skip' || text === 'skip ad' || text === 'skip ads' || text.includes('skip ad') || text.includes('বিজ্ঞাপন এড়িয়ে যান')) {
-          forceClickElement(el);
-          recordAdBlocked(1);
-          return true;
-        }
-      }
-    } catch {}
-
     return false;
   }
 
   /**
-   * Safe, Lightweight First-Version YouTube Ad Handler:
+   * Safe, Non-Freezing YouTube Ad Handler:
    * - No currentTime seeking (prevents MSE pipeline crash & black screen)
-   * - No aggressive playbackRate speed modification (lets YouTube player stream naturally)
+   * - No playbackRate speed modification (lets YouTube player stream naturally)
    * - Simply mutes audio when an ad is active so the user never hears ads
-   * - Programmatically clicks skip buttons (.ytp-ad-skip-button) the moment they appear
-   * - Cleanly un-mutes audio as soon as the ad finishes
+   * - Safely clicks skip buttons (.ytp-ad-skip-button) without triggering video pauses
+   * - Cleanly un-mutes audio as soon as the ad finishes (.ad-showing disappears)
    * - Hides overlay banners & companion ad slots cleanly from DOM
    */
   function handleYouTubeAds(): void {
     if (!isProtectionActive() || !moduleSettings.blockYouTubeAds) return;
 
     const player = (document.getElementById('movie_player') || document.querySelector('.html5-video-player')) as HTMLElement | null;
+    if (!player) return;
+
     const isAdActive = Boolean(
-      player && (
-        player.classList.contains('ad-showing') ||
-        player.classList.contains('ad-interrupting')
-      )
+      player.classList.contains('ad-showing') ||
+      player.classList.contains('ad-interrupting')
     );
 
-    const video = (document.querySelector('video.html5-main-video') || (player ? player.querySelector('video') : document.querySelector('video'))) as HTMLVideoElement | null;
+    const video = (document.querySelector('video.html5-main-video') || player.querySelector('video')) as HTMLVideoElement | null;
 
     if (isAdActive) {
       // 1. Simply mute the audio while the ad is showing
@@ -257,24 +221,17 @@ import { StorageData, ModuleSettings, CustomFilters, TabStatsResponse } from './
         recordAdBlocked(1);
       }
 
-      // 2. Click any available skip button the instant it appears
-      if (player) {
-        triggerSkipButtons(player);
-
-        // Native skip call if exposed
-        if (typeof (player as any).skipAd === 'function') {
-          try {
-            (player as any).skipAd();
-          } catch {}
-        }
+      // 2. Click any available skip button safely the instant it appears
+      triggerSkipButtons(player);
+    } else {
+      // 3. Ad has ended naturally or was skipped! Cleanly un-mute
+      if (video && video.dataset.cbWasMuted === 'true') {
+        delete video.dataset.cbWasMuted;
+        video.muted = false;
       }
-    } else if (video && video.dataset.cbWasMuted === 'true') {
-      // Ad has ended naturally or was skipped! Cleanly un-mute
-      delete video.dataset.cbWasMuted;
-      video.muted = false;
     }
 
-    // 3. Cleanly hide companion ads and sidebar sponsored boxes from the DOM
+    // 4. Cleanly hide companion ads and sidebar sponsored boxes from the DOM
     for (const selector of YOUTUBE_COMPANION_AD_SELECTORS) {
       try {
         const matches = document.querySelectorAll<HTMLElement>(selector);
@@ -288,7 +245,7 @@ import { StorageData, ModuleSettings, CustomFilters, TabStatsResponse } from './
       } catch {}
     }
 
-    // 4. Dismiss Anti-Adblock modal if triggered
+    // 5. Dismiss Anti-Adblock modal if triggered
     try {
       const modal = document.querySelector('tp-yt-paper-dialog:has(ytd-enforcement-message-view-model), ytd-enforcement-message-view-model');
       if (modal) {
@@ -652,15 +609,15 @@ import { StorageData, ModuleSettings, CustomFilters, TabStatsResponse } from './
     if (!domObserver && (document.body || document.documentElement)) {
       let rAF: number | null = null;
       domObserver = new MutationObserver(() => {
-        if (isYouTubeSite) {
-          handleYouTubeAds();
-        } else {
-          if (!rAF) {
-            rAF = requestAnimationFrame(() => {
-              rAF = null;
+        if (!rAF) {
+          rAF = requestAnimationFrame(() => {
+            rAF = null;
+            if (isYouTubeSite) {
+              handleYouTubeAds();
+            } else {
               runScan();
-            });
-          }
+            }
+          });
         }
       });
 
@@ -672,13 +629,13 @@ import { StorageData, ModuleSettings, CustomFilters, TabStatsResponse } from './
       });
     }
 
-    // High-precision YouTube check (runs every 250ms as a backup safety net)
+    // Lightweight safety interval for YouTube (500ms)
     if (isYouTubeSite && !youtubeSafetyTimer) {
       youtubeSafetyTimer = setInterval(() => {
         if (isProtectionActive()) {
           handleYouTubeAds();
         }
-      }, 250);
+      }, 500);
     }
   }
 

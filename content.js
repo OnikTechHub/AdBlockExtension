@@ -116,79 +116,40 @@
       "#masthead-ad",
       "ytd-banner-promo-renderer"
     ];
-    function forceClickElement(element) {
-      if (!element) return;
-      try {
-        element.focus?.();
-      } catch {
-      }
-      const events = ["pointerdown", "mousedown", "pointerup", "mouseup", "click"];
-      for (const evt of events) {
-        try {
-          element.dispatchEvent(new MouseEvent(evt, {
-            bubbles: true,
-            cancelable: true,
-            view: window
-          }));
-        } catch {
-        }
-      }
-      try {
-        element.click();
-      } catch {
-      }
-    }
     function triggerSkipButtons(container = document) {
       for (const selector of YOUTUBE_SKIP_SELECTORS) {
         try {
           const btn = container.querySelector(selector);
           if (btn) {
-            forceClickElement(btn);
+            btn.click();
             recordAdBlocked(1);
             return true;
           }
         } catch {
         }
-      }
-      try {
-        const candidates = container.querySelectorAll('.video-ads button, .ytp-ad-player-overlay button, [class*="skip"] button');
-        for (const el of candidates) {
-          const text = (el.textContent || "").trim().toLowerCase();
-          if (text === "skip" || text === "skip ad" || text === "skip ads" || text.includes("skip ad") || text.includes("\u09AC\u09BF\u099C\u09CD\u099E\u09BE\u09AA\u09A8 \u098F\u09A1\u09BC\u09BF\u09AF\u09BC\u09C7 \u09AF\u09BE\u09A8")) {
-            forceClickElement(el);
-            recordAdBlocked(1);
-            return true;
-          }
-        }
-      } catch {
       }
       return false;
     }
     function handleYouTubeAds() {
       if (!isProtectionActive() || !moduleSettings.blockYouTubeAds) return;
       const player = document.getElementById("movie_player") || document.querySelector(".html5-video-player");
+      if (!player) return;
       const isAdActive = Boolean(
-        player && (player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting"))
+        player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting")
       );
-      const video = document.querySelector("video.html5-main-video") || (player ? player.querySelector("video") : document.querySelector("video"));
+      const video = document.querySelector("video.html5-main-video") || player.querySelector("video");
       if (isAdActive) {
         if (video && !video.muted) {
           video.dataset.cbWasMuted = "true";
           video.muted = true;
           recordAdBlocked(1);
         }
-        if (player) {
-          triggerSkipButtons(player);
-          if (typeof player.skipAd === "function") {
-            try {
-              player.skipAd();
-            } catch {
-            }
-          }
+        triggerSkipButtons(player);
+      } else {
+        if (video && video.dataset.cbWasMuted === "true") {
+          delete video.dataset.cbWasMuted;
+          video.muted = false;
         }
-      } else if (video && video.dataset.cbWasMuted === "true") {
-        delete video.dataset.cbWasMuted;
-        video.muted = false;
       }
       for (const selector of YOUTUBE_COMPANION_AD_SELECTORS) {
         try {
@@ -502,15 +463,15 @@
       if (!domObserver && (document.body || document.documentElement)) {
         let rAF = null;
         domObserver = new MutationObserver(() => {
-          if (isYouTubeSite) {
-            handleYouTubeAds();
-          } else {
-            if (!rAF) {
-              rAF = requestAnimationFrame(() => {
-                rAF = null;
+          if (!rAF) {
+            rAF = requestAnimationFrame(() => {
+              rAF = null;
+              if (isYouTubeSite) {
+                handleYouTubeAds();
+              } else {
                 runScan();
-              });
-            }
+              }
+            });
           }
         });
         domObserver.observe(document.body || document.documentElement, {
@@ -525,7 +486,7 @@
           if (isProtectionActive()) {
             handleYouTubeAds();
           }
-        }, 250);
+        }, 500);
       }
     }
     function stopProtection() {
