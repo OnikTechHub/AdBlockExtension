@@ -55,3 +55,4 @@ export interface TabStatsResponse {
   isWhitelisted: boolean;
   isEnabled: boolean;
 }
+
