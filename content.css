@@ -51,6 +51,7 @@
 :root:not(.cb-disabled) .ytp-ad-action-interstitial,
 :root:not(.cb-disabled) .ytp-ad-image-overlay,
 :root:not(.cb-disabled) .ytp-ad-text-overlay,
+:root:not(.cb-disabled) .ytp-ad-player-overlay-flyout-cta,
 :root:not(.cb-disabled) ytd-promoted-sparkles-web-renderer,
 :root:not(.cb-disabled) ytd-promoted-video-renderer,
 :root:not(.cb-disabled) ytd-compact-promoted-video-renderer,
@@ -77,6 +78,15 @@
   height: 0 !important;
   min-height: 0 !important;
   pointer-events: none !important;
+}
+
+/* Zero-Display Visual Shield for Active In-Player Video Overlays */
+:root:not(.cb-disabled) .ytp-ad-player-overlay:not(:has(.ytp-ad-skip-button)):not(:has(.ytp-ad-skip-button-modern)),
+:root:not(.cb-disabled) .ytp-ad-player-overlay-layout:not(:has(.ytp-ad-skip-button)):not(:has(.ytp-ad-skip-button-modern)),
+:root:not(.cb-disabled) .ytp-ad-preview-container,
+:root:not(.cb-disabled) .ad-interrupting .ytp-ad-player-overlay,
+:root:not(.cb-disabled) .ad-showing .ytp-ad-player-overlay-layout {
+  opacity: 0 !important;
 }
 
 /* Facebook & Social Media Ad Elements */

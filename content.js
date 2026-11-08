@@ -1,9 +1,10 @@
 /**
  * Chrome Blocks - Core Content Script
  * 
- * Lightweight, high-performance ad skipper and cosmetic DOM cleaner.
- * Clean, fast MutationObserver + simple interval check for YouTube.
- * Instant zero-delay ad skipping without browser freezing, stuttering, or lag.
+ * High-performance universal ad destruction and auto-click engine.
+ * - Universal auto-clicker with multi-event firing (pointerdown, mousedown, mouseup, click)
+ * - Zero-display ad hiding (visual shield) across YouTube, Facebook, Instagram, and web portals
+ * - Seamless video performance: instant mute, 16x speed-up, and end-of-ad seek
  */
 
 (() => {
@@ -135,37 +136,126 @@
   }
 
   /* ==========================================================================
-     1. Simple & Fast YouTube Ad Skipper Engine
+     1. Universal Multi-Event Auto-Clicker & Skip Engine
      ========================================================================== */
 
-  // Modern YouTube skip button selectors
-  const YOUTUBE_SKIP_SELECTORS = [
+  /**
+   * Dispatches full multi-event sequence to bypass framework event listener gates
+   */
+  function forceClickElement(element) {
+    if (!element) return;
+
+    try {
+      element.focus?.();
+    } catch (e) {}
+
+    // Dispatch full pointer and mouse sequences (mousedown, mouseup, click)
+    const events = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+    for (const evt of events) {
+      try {
+        element.dispatchEvent(new MouseEvent(evt, {
+          bubbles: true,
+          cancelable: true,
+          view: window
+        }));
+      } catch (e) {}
+    }
+
+    // Programmatically invoke .click()
+    try {
+      element.click();
+    } catch (e) {}
+  }
+
+  // Universal skip button selectors across YouTube and streaming video platforms
+  const UNIVERSAL_SKIP_SELECTORS = [
+    // YouTube specific skip variants
     '.ytp-ad-skip-button',
     '.ytp-ad-skip-button-modern',
     '.ytp-skip-ad-button',
     '.ytp-ad-skip-button-slot button',
+    '.ytp-ad-skip-button-slot',
+    '.ytp-ad-skip-button-container button',
     'button.ytp-ad-skip-button',
     'button.ytp-ad-skip-button-modern',
     '.videoAdUiSkipButton',
     '[id^="skip-button:"] button',
     'button[class*="ytp-ad-skip-button"]',
-    '.ytp-ad-overlay-close-button'
+    'button[class*="ytp-skip-ad-button"]',
+    '.ytp-ad-overlay-close-button',
+    // Universal HTML5 video player skip selectors (news sites, videojs, streaming platforms)
+    '.video-ad-skip',
+    '.video-ad-skip-button',
+    '.skip-ad-button',
+    '.skip-ad',
+    '.ad-skip-btn',
+    '.ad-skip-button',
+    '.btn-skip-ad',
+    'button.skip',
+    'button[class*="skip-ad"]',
+    'button[class*="skipAd"]',
+    'button[class*="ad-skip"]',
+    'div[class*="skip-button"]',
+    'div[class*="ad-skip"]',
+    '[aria-label*="Skip Ad" i]',
+    '[aria-label*="Skip ad" i]',
+    '[aria-label="Skip"]',
+    '[aria-label*="skip" i]'
   ];
 
-  // Static overlay & banner elements
+  /**
+   * Scans a container or the document for any skip button variant and clicks it immediately
+   */
+  function scanAndClickSkipButtons(container = document) {
+    let clicked = false;
+
+    // 1. Selector-based instant matching
+    for (const selector of UNIVERSAL_SKIP_SELECTORS) {
+      try {
+        const buttons = container.querySelectorAll(selector);
+        for (const btn of buttons) {
+          if (btn) {
+            forceClickElement(btn);
+            recordAdBlocked(1);
+            clicked = true;
+            break;
+          }
+        }
+      } catch (e) {}
+      if (clicked) return true;
+    }
+
+    // 2. Text-based scan in player overlays or buttons (supports multilingual "Skip" / "বিজ্ঞাপন এড়িয়ে যান")
+    try {
+      const candidateButtons = container.querySelectorAll('.video-ads button, .video-ads [role="button"], .ytp-ad-player-overlay button, .video-ad-container button, [class*="player"] button');
+      for (const el of candidateButtons) {
+        const text = (el.textContent || '').trim().toLowerCase();
+        if (text === 'skip' || text === 'skip ad' || text === 'skip ads' || text.includes('skip ad') || text.includes('বিজ্ঞাপন এড়িয়ে যান')) {
+          forceClickElement(el);
+          recordAdBlocked(1);
+          clicked = true;
+          break;
+        }
+      }
+    } catch (e) {}
+
+    return clicked;
+  }
+
+  /* ==========================================================================
+     2. Dedicated YouTube Ad Destroyer & Zero-Display Visual Shield
+     ========================================================================== */
+
   const YOUTUBE_AD_CONTAINERS = [
     '#player-ads',
     '.ytp-ad-overlay-container',
     '.ytp-ad-message-container',
-    'ytd-ad-slot-renderer'
+    '.ytp-ad-action-interstitial',
+    'ytd-ad-slot-renderer',
+    '#masthead-ad',
+    'ytd-banner-promo-renderer'
   ];
 
-  /**
-   * Fast, reliable YouTube Ad Skipper:
-   * Looks strictly for .ad-showing or .ad-interrupting classes on the player.
-   * When an ad is showing: instantly sets currentTime to duration, rate to 16x, mutes, and clicks skip.
-   * When no ad is showing: restores rate to 1.0x, un-mutes, and remains completely idle.
-   */
   function processYouTube() {
     if (!isProtectionActive() || !moduleSettings.blockYouTubeAds) return;
 
@@ -175,26 +265,34 @@
       player.classList.contains('ad-interrupting')
     );
 
-    const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+    const video = document.querySelector('video.html5-main-video') || (player ? player.querySelector('video') : document.querySelector('video'));
 
     if (isAdShowing) {
+      // Zero-Display Visual Shield: Hide player ad overlays immediately so user sees nothing
+      try {
+        const overlays = player.querySelectorAll('.ytp-ad-player-overlay, .ytp-ad-player-overlay-layout, .ytp-ad-text-overlay, .ytp-ad-image-overlay, #player-ads');
+        for (const ov of overlays) {
+          ov.style.setProperty('display', 'none', 'important');
+        }
+      } catch (e) {}
+
       if (video) {
-        // Mute ad audio so user never hears jarring ads
+        // 1. Instantly mute audio so user never hears ad audio
         if (!video.muted) {
           video.dataset.cbWasMuted = 'true';
           video.muted = true;
         }
 
-        // Force maximum playback speed
+        // 2. Accelerate ad to 16x speed
         video.dataset.cbAdSpeedModified = 'true';
         video.playbackRate = 16.0;
 
-        // Instantly jump to the end of the ad segment
+        // 3. Jump to the end of the ad segment
         if (Number.isFinite(video.duration) && video.duration > 0) {
           video.currentTime = video.duration;
         }
 
-        // Ensure video is playing so ad dismissal triggers
+        // Ensure video is playing so YouTube triggers ad conclusion
         if (video.paused) {
           video.play().catch(() => {});
         }
@@ -202,25 +300,17 @@
         recordAdBlocked(1);
       }
 
-      // Fast-click any visible skip buttons
-      for (const selector of YOUTUBE_SKIP_SELECTORS) {
-        try {
-          const btn = document.querySelector(selector);
-          if (btn) {
-            btn.click();
-            break;
-          }
-        } catch (e) {}
-      }
+      // 4. Force-click any visible skip buttons with multi-events
+      scanAndClickSkipButtons(player);
 
-      // Try native player skip method if available
+      // 5. Native player skip hook
       if (player && typeof player.skipAd === 'function') {
         try {
           player.skipAd();
         } catch (e) {}
       }
     } else if (video && video.dataset.cbAdSpeedModified) {
-      // Normal video restored - cleanly reset playback speed and un-mute
+      // Ad has ended! Cleanly restore normal video playback speed and un-mute
       delete video.dataset.cbAdSpeedModified;
       video.playbackRate = 1.0;
 
@@ -234,7 +324,7 @@
       }
     }
 
-    // Hide cosmetic overlay containers
+    // Hide cosmetic companion ad containers (Zero-Display Shield)
     for (const selector of YOUTUBE_AD_CONTAINERS) {
       try {
         const elements = document.querySelectorAll(selector);
@@ -261,12 +351,13 @@
   }
 
   /* ==========================================================================
-     2. Social Media Feed Scrubbers (Facebook, Instagram, Twitter, Reddit)
+     3. Social Media Feed Scrubbers (Zero-Display Visual Shield)
      ========================================================================== */
 
   function processFacebook() {
     if (!isProtectionActive() || !moduleSettings.blockSocialAds) return;
 
+    // Feed units & posts
     const feedUnits = document.querySelectorAll('div[data-pagelet^="FeedUnit"]:not([data-cb-processed]), div[role="feed"] > div:not([data-cb-processed])');
     for (const post of feedUnits) {
       if (!post) continue;
@@ -353,7 +444,7 @@
   }
 
   /* ==========================================================================
-     3. General Web Ads & Cookie Notices
+     4. General Web Ads, Video Portals & Cookie Notices
      ========================================================================== */
 
   const COMMON_WEB_AD_SELECTORS = [
@@ -436,28 +527,57 @@
   }
 
   /**
-   * Router for page-specific ad processing
+   * Universal HTML5 Video Player Ad Interceptor (for news sites & web video players)
+   */
+  function processGenericVideoAds() {
+    // Scan and auto-click any visible skip buttons across the page
+    scanAndClickSkipButtons(document);
+
+    // Accelerate and skip video ads in generic video containers
+    const videoAdContainers = document.querySelectorAll('.video-ads, [class*="video-ad"], [class*="ad-player"], .ima-ad-container');
+    for (const container of videoAdContainers) {
+      const video = container.querySelector('video');
+      if (video) {
+        if (!video.muted) {
+          video.dataset.cbWasMuted = 'true';
+          video.muted = true;
+        }
+        video.dataset.cbAdSpeedModified = 'true';
+        video.playbackRate = 16.0;
+        if (Number.isFinite(video.duration) && video.duration > 0) {
+          video.currentTime = video.duration;
+        }
+        scanAndClickSkipButtons(container);
+      }
+    }
+  }
+
+  /**
+   * Main scan router
    */
   function runScan() {
     if (!isProtectionActive()) return;
 
     if (isYouTubeSite) {
       processYouTube();
-    } else if (hostname.includes('facebook.com')) {
-      processFacebook();
-    } else if (hostname.includes('instagram.com')) {
-      processInstagram();
-    } else if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
-      processTwitter();
-    } else if (hostname.includes('reddit.com')) {
-      processReddit();
     } else {
-      processGeneralWeb();
+      if (hostname.includes('facebook.com')) {
+        processFacebook();
+      } else if (hostname.includes('instagram.com')) {
+        processInstagram();
+      } else if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
+        processTwitter();
+      } else if (hostname.includes('reddit.com')) {
+        processReddit();
+      } else {
+        processGeneralWeb();
+      }
+      processGenericVideoAds();
     }
   }
 
   /* ==========================================================================
-     4. Interactive Element Picker
+     5. Interactive Element Picker
      ========================================================================== */
 
   function computeUniqueSelector(element) {
@@ -584,17 +704,27 @@
   }
 
   /* ==========================================================================
-     5. Lifecycle, Observers & Storage Sync
+     6. Lifecycle, Observers & Storage Sync
      ========================================================================== */
 
   function startProtection() {
     updateCosmeticClass();
     runScan();
 
-    // Fast MutationObserver on DOM changes
+    // High-performance MutationObserver watching for ad insertions and player class changes
     if (!observer && (document.body || document.documentElement)) {
+      let rAF = null;
       observer = new MutationObserver(() => {
-        runScan();
+        if (isYouTubeSite) {
+          processYouTube();
+        } else {
+          if (!rAF) {
+            rAF = requestAnimationFrame(() => {
+              rAF = null;
+              runScan();
+            });
+          }
+        }
       });
 
       observer.observe(document.body || document.documentElement, {
@@ -605,13 +735,13 @@
       });
     }
 
-    // Simple 300ms interval check as a foolproof safety net for YouTube
+    // Safety fallback interval for YouTube (250ms)
     if (isYouTubeSite && !youtubeInterval) {
       youtubeInterval = setInterval(() => {
         if (isProtectionActive()) {
           processYouTube();
         }
-      }, 300);
+      }, 250);
     }
   }
 
