@@ -1,14 +1,14 @@
 /**
- * Chrome Blocks - Streamlined Background Service Worker (Manifest V3)
+ * Chrome Blocks - Lightweight Background Service Worker (Manifest V3)
  * 
- * Manages DeclarativeNetRequest rulesets, dynamic whitelist rules,
- * in-memory telemetry caching (preventing disk I/O thrashing), and tab badges.
+ * Simple, efficient DeclarativeNetRequest manager and statistics tracker.
+ * Zero background bloat, zero disk thrashing, and zero browser lag.
  */
 
 const RULESET_ID = 'ruleset_1';
 const TAB_STATS = new Map(); // tabId -> count of ads blocked in this tab
 
-// In-memory stats cache to completely eliminate disk I/O lockups and IPC thrashing
+// In-memory stats cache to avoid disk I/O lockups
 let inMemoryTotalBlocked = 0;
 let inMemoryTodayBlocked = 0;
 let inMemoryLastResetDate = new Date().toDateString();
@@ -17,7 +17,7 @@ let inMemoryWhitelistedDomains = [];
 let saveStorageTimeout = null;
 
 /**
- * Initialize extension state and cache from storage on install/startup
+ * Initialize default storage values and sync DNR ruleset
  */
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get([
@@ -64,7 +64,7 @@ async function syncRuleset(enabled) {
       });
     }
   } catch (error) {
-    console.warn('Chrome Blocks: Ruleset sync notice:', error.message);
+    console.warn('Chrome Blocks: Ruleset notice:', error.message);
   }
 }
 
@@ -105,13 +105,12 @@ async function syncWhitelistDynamicRules(domains = []) {
       addRules: addRules
     });
   } catch (error) {
-    console.warn('Chrome Blocks: Dynamic whitelist update notice:', error.message);
+    console.warn('Chrome Blocks: Dynamic whitelist notice:', error.message);
   }
 }
 
 /**
- * Debounced persistence of in-memory telemetry to chrome.storage.local
- * Prevents writing to disk hundreds of times per second.
+ * Debounced persistence of in-memory stats to chrome.storage.local
  */
 function scheduleStorageSave() {
   if (saveStorageTimeout) return;
@@ -124,11 +123,11 @@ function scheduleStorageSave() {
         lastResetDate: inMemoryLastResetDate
       });
     } catch (e) {}
-  }, 3500);
+  }, 2500);
 }
 
 /**
- * Increment telemetry in memory with zero disk delay
+ * Record blocked ad occurrences without locking up storage or browser
  */
 function recordBlockedOccurrence(count = 1, tabId = null) {
   if (count <= 0 || !isEnabledState) return;
@@ -196,61 +195,20 @@ async function updateBadgeState(enabled) {
   } catch (e) {}
 }
 
-/**
- * Tab badge throttle map to avoid flooding Chrome IPC
- */
-const BADGE_UPDATE_TIMERS = new Map();
-
 async function updateTabBadge(tabId, count) {
   if (!tabId || tabId <= 0) return;
-
-  if (BADGE_UPDATE_TIMERS.has(tabId)) {
-    clearTimeout(BADGE_UPDATE_TIMERS.get(tabId));
-  }
-
-  BADGE_UPDATE_TIMERS.set(tabId, setTimeout(async () => {
-    BADGE_UPDATE_TIMERS.delete(tabId);
-    try {
-      if (!isEnabledState) {
-        await chrome.action.setBadgeText({ tabId, text: 'OFF' });
-        await chrome.action.setBadgeBackgroundColor({ tabId, color: '#64748b' });
-      } else if (count > 0) {
-        const text = count > 999 ? '999+' : String(count);
-        await chrome.action.setBadgeText({ tabId, text });
-        await chrome.action.setBadgeBackgroundColor({ tabId, color: '#00d2ff' });
-      } else {
-        await chrome.action.setBadgeText({ tabId, text: '' });
-      }
-    } catch (e) {}
-  }, 120));
-}
-
-/**
- * Targeted network block listener:
- * Filters out non-essential telemetry pings and internal media requests
- * to prevent counter inflation and browser lagging.
- */
-if (chrome.declarativeNetRequest && chrome.declarativeNetRequest.onRuleMatchedDebug) {
-  chrome.declarativeNetRequest.onRuleMatchedDebug.addListener((info) => {
-    const req = info?.request;
-    if (!req) return;
-
-    // Filter out non-essential background pings, beacons, and reports that inflate counters
-    const resType = req.type || '';
-    if (resType === 'ping' || resType === 'csp_report' || resType === 'other' && req.url?.includes('/stats/')) {
-      return;
+  try {
+    if (!isEnabledState) {
+      await chrome.action.setBadgeText({ tabId, text: 'OFF' });
+      await chrome.action.setBadgeBackgroundColor({ tabId, color: '#64748b' });
+    } else if (count > 0) {
+      const text = count > 999 ? '999+' : String(count);
+      await chrome.action.setBadgeText({ tabId, text });
+      await chrome.action.setBadgeBackgroundColor({ tabId, color: '#00d2ff' });
+    } else {
+      await chrome.action.setBadgeText({ tabId, text: '' });
     }
-
-    // Never count or interfere with YouTube or GoogleVideo requests
-    const url = (req.url || '').toLowerCase();
-    const initiator = (req.initiator || '').toLowerCase();
-    if (url.includes('youtube.com') || url.includes('googlevideo.com') || initiator.includes('youtube.com')) {
-      return;
-    }
-
-    // Record verified network-level ad/tracker block
-    recordBlockedOccurrence(1, req.tabId);
-  });
+  } catch (e) {}
 }
 
 /**
@@ -262,7 +220,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     switch (message.type) {
       case 'GET_STATS': {
-        // Return immediately from memory cache (0ms latency, zero disk read)
         sendResponse({
           isEnabled: isEnabledState,
           totalBlocked: inMemoryTotalBlocked,
