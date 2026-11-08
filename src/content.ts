@@ -228,12 +228,13 @@ import { StorageData, ModuleSettings, CustomFilters, TabStatsResponse } from './
   }
 
   /**
-   * Safe YouTube Ad Interception:
-   * 1. Detects ad state strictly from player classes (.ad-showing, .ad-interrupting).
-   * 2. Sets playbackRate = 16.0 and muted = true.
-   * 3. NEVER touches video.currentTime (prevents pipeline/decoder crash & black screen!).
-   * 4. Actively clicks skip buttons the instant they mount.
-   * 5. Immediately restores playbackRate = 1.0 and un-mutes on ad completion.
+   * Safe, Lightweight First-Version YouTube Ad Handler:
+   * - No currentTime seeking (prevents MSE pipeline crash & black screen)
+   * - No aggressive playbackRate speed modification (lets YouTube player stream naturally)
+   * - Simply mutes audio when an ad is active so the user never hears ads
+   * - Programmatically clicks skip buttons (.ytp-ad-skip-button) the moment they appear
+   * - Cleanly un-mutes audio as soon as the ad finishes
+   * - Hides overlay banners & companion ad slots cleanly from DOM
    */
   function handleYouTubeAds(): void {
     if (!isProtectionActive() || !moduleSettings.blockYouTubeAds) return;
@@ -249,54 +250,31 @@ import { StorageData, ModuleSettings, CustomFilters, TabStatsResponse } from './
     const video = (document.querySelector('video.html5-main-video') || (player ? player.querySelector('video') : document.querySelector('video'))) as HTMLVideoElement | null;
 
     if (isAdActive) {
-      if (video) {
-        // 1. Instantly mute audio so user never hears ad bursts
-        if (!video.muted) {
-          video.dataset.cbMutedByShield = 'true';
-          video.muted = true;
-        }
-
-        // 2. Set playback speed to maximum (16x) so ad finishes safely in milliseconds
-        if (video.playbackRate !== 16.0) {
-          video.dataset.cbSpeedByShield = 'true';
-          video.playbackRate = 16.0;
-        }
-
-        // Ensure video is playing so the ad finishes quickly
-        if (video.paused) {
-          video.play().catch(() => {});
-        }
-
+      // 1. Simply mute the audio while the ad is showing
+      if (video && !video.muted) {
+        video.dataset.cbWasMuted = 'true';
+        video.muted = true;
         recordAdBlocked(1);
       }
 
-      // 3. Actively look for skip button and click it the moment it becomes available
+      // 2. Click any available skip button the instant it appears
       if (player) {
         triggerSkipButtons(player);
 
-        // Native player hook if exposed
+        // Native skip call if exposed
         if (typeof (player as any).skipAd === 'function') {
           try {
             (player as any).skipAd();
           } catch {}
         }
       }
-    } else if (video && video.dataset.cbSpeedByShield) {
-      // Ad has ended! Instantly and cleanly restore normal playback without freezing
-      delete video.dataset.cbSpeedByShield;
-      video.playbackRate = 1.0;
-
-      if (video.dataset.cbMutedByShield === 'true') {
-        delete video.dataset.cbMutedByShield;
-        video.muted = false;
-      }
-
-      if (video.paused) {
-        video.play().catch(() => {});
-      }
+    } else if (video && video.dataset.cbWasMuted === 'true') {
+      // Ad has ended naturally or was skipped! Cleanly un-mute
+      delete video.dataset.cbWasMuted;
+      video.muted = false;
     }
 
-    // Strip companion ads and sidebar sponsored boxes cleanly from DOM
+    // 3. Cleanly hide companion ads and sidebar sponsored boxes from the DOM
     for (const selector of YOUTUBE_COMPANION_AD_SELECTORS) {
       try {
         const matches = document.querySelectorAll<HTMLElement>(selector);
@@ -310,7 +288,7 @@ import { StorageData, ModuleSettings, CustomFilters, TabStatsResponse } from './
       } catch {}
     }
 
-    // Dismiss Anti-Adblock modal if present
+    // 4. Dismiss Anti-Adblock modal if triggered
     try {
       const modal = document.querySelector('tp-yt-paper-dialog:has(ytd-enforcement-message-view-model), ytd-enforcement-message-view-model');
       if (modal) {
@@ -503,17 +481,11 @@ import { StorageData, ModuleSettings, CustomFilters, TabStatsResponse } from './
     const videoAdContainers = document.querySelectorAll<HTMLElement>('.video-ads, [class*="video-ad"], [class*="ad-player"], .ima-ad-container');
     for (const container of videoAdContainers) {
       const video = container.querySelector('video');
-      if (video) {
-        if (!video.muted) {
-          video.dataset.cbMutedByShield = 'true';
-          video.muted = true;
-        }
-        if (video.playbackRate !== 16.0) {
-          video.dataset.cbSpeedByShield = 'true';
-          video.playbackRate = 16.0;
-        }
-        triggerSkipButtons(container);
+      if (video && !video.muted) {
+        video.dataset.cbWasMuted = 'true';
+        video.muted = true;
       }
+      triggerSkipButtons(container);
     }
   }
 

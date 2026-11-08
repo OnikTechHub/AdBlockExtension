@@ -172,19 +172,9 @@
       );
       const video = document.querySelector("video.html5-main-video") || (player ? player.querySelector("video") : document.querySelector("video"));
       if (isAdActive) {
-        if (video) {
-          if (!video.muted) {
-            video.dataset.cbMutedByShield = "true";
-            video.muted = true;
-          }
-          if (video.playbackRate !== 16) {
-            video.dataset.cbSpeedByShield = "true";
-            video.playbackRate = 16;
-          }
-          if (video.paused) {
-            video.play().catch(() => {
-            });
-          }
+        if (video && !video.muted) {
+          video.dataset.cbWasMuted = "true";
+          video.muted = true;
           recordAdBlocked(1);
         }
         if (player) {
@@ -196,17 +186,9 @@
             }
           }
         }
-      } else if (video && video.dataset.cbSpeedByShield) {
-        delete video.dataset.cbSpeedByShield;
-        video.playbackRate = 1;
-        if (video.dataset.cbMutedByShield === "true") {
-          delete video.dataset.cbMutedByShield;
-          video.muted = false;
-        }
-        if (video.paused) {
-          video.play().catch(() => {
-          });
-        }
+      } else if (video && video.dataset.cbWasMuted === "true") {
+        delete video.dataset.cbWasMuted;
+        video.muted = false;
       }
       for (const selector of YOUTUBE_COMPANION_AD_SELECTORS) {
         try {
@@ -388,17 +370,11 @@
       const videoAdContainers = document.querySelectorAll('.video-ads, [class*="video-ad"], [class*="ad-player"], .ima-ad-container');
       for (const container of videoAdContainers) {
         const video = container.querySelector("video");
-        if (video) {
-          if (!video.muted) {
-            video.dataset.cbMutedByShield = "true";
-            video.muted = true;
-          }
-          if (video.playbackRate !== 16) {
-            video.dataset.cbSpeedByShield = "true";
-            video.playbackRate = 16;
-          }
-          triggerSkipButtons(container);
+        if (video && !video.muted) {
+          video.dataset.cbWasMuted = "true";
+          video.muted = true;
         }
+        triggerSkipButtons(container);
       }
     }
     function runScan() {
